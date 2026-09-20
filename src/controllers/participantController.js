@@ -1,6 +1,8 @@
 const { z } = require('zod');
 const Participant = require('../models/Participant');
 const Competition = require('../models/Competition');
+const CertificateTemplate = require('../models/CertificateTemplate');
+const PosterTemplate = require('../models/PosterTemplate');
 
 const participantSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -232,10 +234,157 @@ const bulkUpload = async (req, res, next) => {
   }
 };
 
+// Public lookup/verify endpoint
+const verifyParticipant = async (req, res, next) => {
+  try {
+    const { refNumber, phone } = req.query;
+
+    if (!refNumber && !phone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide an exact Reference Number or Phone to verify',
+      });
+    }
+
+    const query = { isDeleted: false };
+    if (refNumber) {
+      query.refNumber = refNumber.trim().toUpperCase();
+    } else if (phone) {
+      query.phone = phone.trim();
+    }
+
+    const participant = await Participant.findOne(query).populate('competitionId', 'name refPrefix description imageUrl');
+    if (!participant) {
+      return res.status(404).json({
+        success: false,
+        message: 'No participant record found with this reference code or phone.',
+      });
+    }
+
+    // Increment validation counter
+    participant.validatedCount = (participant.validatedCount || 0) + 1;
+    participant.lastValidatedAt = new Date();
+    await participant.save();
+
+    // Fetch corresponding certificate template
+    const certTemplate = await CertificateTemplate.findOne({
+      competitionId: participant.competitionId?._id,
+      variant: participant.achievementType,
+      isActive: true,
+    });
+
+    // Fetch corresponding poster template
+    const posterTemplate = await PosterTemplate.findOne({
+      competitionId: participant.competitionId?._id,
+      type: participant.achievementType,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        participant: {
+          _id: participant._id,
+          name: participant.name,
+          age: participant.age,
+          refNumber: participant.refNumber,
+          achievementType: participant.achievementType,
+          mediaUrl: participant.mediaUrl,
+          competition: participant.competitionId,
+          downloadCount: participant.downloadCount,
+          posterDownloadCount: participant.posterDownloadCount,
+          validatedCount: participant.validatedCount,
+        },
+        certificateTemplate: certTemplate || null,
+        posterTemplate: posterTemplate || null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Public update photo endpoint (for public poster generation)
+const updateParticipantPhoto = async (req, res, next) => {
+  try {
+    const { refNumber, mediaUrl } = req.body;
+    if (!refNumber || !mediaUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Reference number and media URL are required',
+      });
+    }
+
+    const participant = await Participant.findOne({
+      refNumber: refNumber.trim().toUpperCase(),
+      isDeleted: false,
+    });
+
+    if (!participant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Participant not found',
+      });
+    }
+
+    participant.mediaUrl = mediaUrl;
+    await participant.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Participant photo updated successfully',
+      data: {
+        mediaUrl: participant.mediaUrl,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Public track download count
+const recordDownload = async (req, res, next) => {
+  try {
+    const { refNumber, type = 'certificate' } = req.body;
+    if (!refNumber) {
+      return res.status(400).json({ success: false, message: 'Reference number is required' });
+    }
+
+    const participant = await Participant.findOne({
+      refNumber: refNumber.trim().toUpperCase(),
+      isDeleted: false,
+    });
+
+    if (!participant) {
+      return res.status(404).json({ success: false, message: 'Participant not found' });
+    }
+
+    if (type === 'poster') {
+      participant.posterDownloadCount = (participant.posterDownloadCount || 0) + 1;
+    } else {
+      participant.downloadCount = (participant.downloadCount || 0) + 1;
+    }
+    participant.lastDownloadedAt = new Date();
+    await participant.save();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        downloadCount: participant.downloadCount,
+        posterDownloadCount: participant.posterDownloadCount,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createParticipant,
   listParticipants,
   updateParticipant,
   archiveParticipant,
   bulkUpload,
+  verifyParticipant,
+  updateParticipantPhoto,
+  recordDownload,
 };

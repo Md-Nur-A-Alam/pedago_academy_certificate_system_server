@@ -7,8 +7,17 @@ const {
   updateParticipant,
   archiveParticipant,
   bulkUpload,
+  verifyParticipant,
+  updateParticipantPhoto,
+  recordDownload,
 } = require('../controllers/participantController');
 
+// Public endpoints (no admin auth required)
+router.get('/verify', verifyParticipant);
+router.post('/update-photo', updateParticipantPhoto);
+router.post('/record-download', recordDownload);
+
+// Admin-only endpoints
 router.use(requireAuth);
 
 router.post('/', createParticipant);
