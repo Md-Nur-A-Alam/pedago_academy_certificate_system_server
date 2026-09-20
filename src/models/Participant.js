@@ -60,7 +60,6 @@ const participantSchema = new mongoose.Schema(
   }
 );
 
-participantSchema.index({ refNumber: 1 }, { unique: true });
 participantSchema.index({ competitionId: 1, achievementType: 1 });
 participantSchema.index({ name: 'text', phone: 1 });
 
