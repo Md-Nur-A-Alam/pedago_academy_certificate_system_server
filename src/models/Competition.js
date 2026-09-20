@@ -13,6 +13,10 @@ const competitionSchema = new mongoose.Schema(
       trim: true,
       default: 'General',
     },
+    categories: {
+      type: [String],
+      default: ['General'],
+    },
     description: {
       type: String,
       default: '',

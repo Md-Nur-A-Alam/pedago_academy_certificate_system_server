@@ -22,7 +22,7 @@ const listTemplates = async (req, res, next) => {
 
 const createOrUpdateTemplate = async (req, res, next) => {
   try {
-    const { competitionId, variant, backgroundImageUrl, nameZone, refZone } = req.body;
+    const { competitionId, variant, backgroundImageUrl, nameZone, refZone, dateZone, signatureZone } = req.body;
 
     if (!competitionId || !variant || !backgroundImageUrl) {
       return res.status(400).json({ success: false, message: 'competitionId, variant, and backgroundImageUrl are required' });
@@ -34,6 +34,8 @@ const createOrUpdateTemplate = async (req, res, next) => {
       existing.backgroundImageUrl = backgroundImageUrl;
       if (nameZone) existing.nameZone = nameZone;
       if (refZone) existing.refZone = refZone;
+      if (dateZone) existing.dateZone = dateZone;
+      if (signatureZone) existing.signatureZone = signatureZone;
       existing.version += 1;
       await existing.save();
 
@@ -50,6 +52,8 @@ const createOrUpdateTemplate = async (req, res, next) => {
       backgroundImageUrl,
       nameZone: nameZone || {},
       refZone: refZone || {},
+      dateZone: dateZone || {},
+      signatureZone: signatureZone || {},
       version: 1,
       isActive: true,
     });

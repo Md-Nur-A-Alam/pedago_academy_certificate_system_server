@@ -3,7 +3,8 @@ const Competition = require('../models/Competition');
 
 const competitionSchema = z.object({
   name: z.string().min(1, 'Competition name is required'),
-  category: z.string().min(1, 'Category is required').default('General'),
+  category: z.string().optional().default('General'),
+  categories: z.array(z.string().min(1, 'Category name cannot be empty')).min(1, 'At least one category is required').optional().default(['General']),
   description: z.string().optional().default(''),
   refPrefix: z.string().min(1, 'Reference prefix is required').toUpperCase().trim(),
   refPadding: z.number().min(0).max(6).optional().default(0),
@@ -17,6 +18,14 @@ const updateCompetitionSchema = competitionSchema.partial();
 const createCompetition = async (req, res, next) => {
   try {
     const validatedData = competitionSchema.parse(req.body);
+
+    // Sync categories and primary category
+    if (validatedData.categories && validatedData.categories.length > 0) {
+      validatedData.category = validatedData.categories[0];
+    } else if (validatedData.category) {
+      validatedData.categories = [validatedData.category];
+    }
+
     const competition = new Competition(validatedData);
     await competition.save();
 
@@ -90,6 +99,12 @@ const getCompetitionById = async (req, res, next) => {
 const updateCompetition = async (req, res, next) => {
   try {
     const validatedData = updateCompetitionSchema.parse(req.body);
+
+    if (validatedData.categories && validatedData.categories.length > 0) {
+      validatedData.category = validatedData.categories[0];
+    } else if (validatedData.category) {
+      validatedData.categories = [validatedData.category];
+    }
 
     const competition = await Competition.findOneAndUpdate(
       { _id: req.params.id, isDeleted: false },
