@@ -26,7 +26,15 @@ const getAuth = () => {
       enabled: true,
       disableSignUp: true, // Strictly admin-only; no public self-registration (§3)
     },
-    trustedOrigins: [env.CLIENT_URL],
+    trustedOrigins: [
+      env.CLIENT_URL,
+      env.SERVER_URL,
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'https://*.vercel.app',
+    ]
+      .filter(Boolean)
+      .map((u) => u.trim().replace(/\/+$/, '')),
     advanced: {
       defaultCookieAttributes: {
         sameSite: 'lax',
