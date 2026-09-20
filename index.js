@@ -1,7 +1,7 @@
 const app = require('./src/app');
 
-// If executed directly (e.g. `node index.js` or `npm start` for local development)
-if (require.main === module) {
+// Only start the standalone HTTP listener when running locally via `node index.js`, NEVER on Vercel
+if (!process.env.VERCEL && require.main === module) {
   require('./src/index.js');
 }
 

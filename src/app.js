@@ -64,7 +64,8 @@ app.use(async (req, res, next) => {
     console.error('[Database Middleware Error]:', err.message);
     return res.status(500).json({
       success: false,
-      message: 'Database connection failed',
+      message: 'Database connection failed: ' + err.message,
+      hint: 'Please check MongoDB Atlas Network Access (whitelist 0.0.0.0/0) and ensure MONGODB_URI is configured in Vercel Project Settings.',
     });
   }
 });
