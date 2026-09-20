@@ -1,10 +1,14 @@
 const PosterTemplate = require('../models/PosterTemplate');
+require('../models/Competition');
 
 const listPosterTemplates = async (req, res, next) => {
   try {
     const filter = {};
     if (req.query.competitionId) {
       filter.competitionId = req.query.competitionId;
+    }
+    if (req.query.type) {
+      filter.type = req.query.type;
     }
 
     const templates = await PosterTemplate.find(filter)

@@ -7,7 +7,7 @@ const {
   deletePosterTemplate,
 } = require('../controllers/posterTemplateController');
 
-router.get('/templates', requireAuth, listPosterTemplates);
+router.get('/templates', listPosterTemplates);
 router.post('/templates', requireAuth, createOrUpdatePosterTemplate);
 router.delete('/templates/:id', requireAuth, deletePosterTemplate);
 

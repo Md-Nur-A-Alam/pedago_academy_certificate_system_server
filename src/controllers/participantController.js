@@ -284,6 +284,10 @@ const verifyParticipant = async (req, res, next) => {
       };
     }
 
+    if (req.query.competitionId) {
+      filter.competitionId = req.query.competitionId;
+    }
+
     const participants = await Participant.find(filter)
       .populate('competitionId', 'name refPrefix description imageUrl category')
       .sort({ createdAt: -1 });
@@ -296,11 +300,11 @@ const verifyParticipant = async (req, res, next) => {
     }
 
     // Increment validation counters
-    for (const p of participants) {
-      p.validatedCount = (p.validatedCount || 0) + 1;
-      p.lastValidatedAt = new Date();
-      await p.save();
-    }
+    const participantIds = participants.map((p) => p._id);
+    await Participant.updateMany(
+      { _id: { $in: participantIds } },
+      { $inc: { validatedCount: 1 }, $set: { lastValidatedAt: new Date() } }
+    );
 
     // Fetch corresponding certificate and poster templates for each matching participant
     const results = await Promise.all(
