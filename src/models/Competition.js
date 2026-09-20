@@ -7,6 +7,12 @@ const competitionSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    category: {
+      type: String,
+      required: true,
+      trim: true,
+      default: 'General',
+    },
     description: {
       type: String,
       default: '',

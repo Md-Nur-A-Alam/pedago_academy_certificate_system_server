@@ -8,6 +8,7 @@ const participantSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z.string().min(1, 'Phone is required'),
   age: z.coerce.number().min(1, 'Age must be at least 1').max(120, 'Invalid age'),
+  category: z.string().min(1, 'Category is required').default('General'),
   competitionId: z.string().min(1, 'Competition ID is required'),
   achievementType: z.enum(['participant', 'winner']).default('participant'),
   sourceUrl: z.string().min(1, 'Source URL is required'),
@@ -67,11 +68,16 @@ const listParticipants = async (req, res, next) => {
         { name: searchRegex },
         { phone: searchRegex },
         { refNumber: searchRegex },
+        { category: searchRegex },
       ];
     }
 
     if (req.query.competitionId) {
       filter.competitionId = req.query.competitionId;
+    }
+
+    if (req.query.category) {
+      filter.category = { $regex: req.query.category, $options: 'i' };
     }
 
     if (req.query.achievementType && ['participant', 'winner'].includes(req.query.achievementType)) {
@@ -168,14 +174,19 @@ const bulkUpload = async (req, res, next) => {
       const mediaUrl = row.mediaUrl ? String(row.mediaUrl).trim() : '';
       const age = Number(row.age) || 0;
 
+      const category = (row.category || row.Category || row.CATEGORY || 'General').toString().trim();
+
       if (!name || !phone || !sourceUrl) {
         continue;
       }
 
-      // Check for duplicate by phone + competition
+      // Check for duplicate by phone + competition + category
+      // (A single person can participate in multiple categories and competitions)
+      const escapedCategory = category.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const existing = await Participant.findOne({
         competitionId,
         phone,
+        category: { $regex: new RegExp(`^${escapedCategory}$`, 'i') },
         isDeleted: false,
       });
 
@@ -184,10 +195,11 @@ const bulkUpload = async (req, res, next) => {
           rowNumber: i + 1,
           name,
           phone,
+          category,
           age: age || existing.age || 'N/A',
           sourceUrl,
           existingRefNumber: existing.refNumber,
-          reason: `Phone already exists in this competition (Ref: ${existing.refNumber})`,
+          reason: `Phone already registered in this competition under Category "${category}" (Ref: ${existing.refNumber})`,
         });
         continue;
       }
@@ -209,6 +221,7 @@ const bulkUpload = async (req, res, next) => {
         name,
         phone,
         age: age > 0 ? age : 18,
+        category,
         sourceUrl,
         mediaUrl,
         competitionId,
@@ -234,68 +247,106 @@ const bulkUpload = async (req, res, next) => {
   }
 };
 
-// Public lookup/verify endpoint
+// Public lookup/verify endpoint with 6-digit phone matching and multi-result support
 const verifyParticipant = async (req, res, next) => {
   try {
-    const { refNumber, phone } = req.query;
+    const { refNumber, phone, query: searchQuery } = req.query;
+    const input = (searchQuery || phone || refNumber || '').trim();
 
-    if (!refNumber && !phone) {
+    if (!input) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide an exact Reference Number or Phone to verify',
+        message: 'Please provide a Reference Number or Phone Number',
       });
     }
 
-    const query = { isDeleted: false };
-    if (refNumber) {
-      query.refNumber = refNumber.trim().toUpperCase();
-    } else if (phone) {
-      query.phone = phone.trim();
+    const digits = input.replace(/\D/g, '');
+    let filter = { isDeleted: false };
+
+    // If search term has 6 or more digits, match by last 6 digits of phone
+    if (digits.length >= 6) {
+      const last6 = digits.slice(-6);
+      const phonePattern = last6.split('').join('\\D*') + '\\D*$';
+      filter = {
+        isDeleted: false,
+        $or: [
+          { phone: { $regex: new RegExp(phonePattern) } },
+          { refNumber: input.toUpperCase() },
+        ],
+      };
+    } else {
+      filter = {
+        isDeleted: false,
+        $or: [
+          { refNumber: input.toUpperCase() },
+          { phone: input },
+        ],
+      };
     }
 
-    const participant = await Participant.findOne(query).populate('competitionId', 'name refPrefix description imageUrl');
-    if (!participant) {
+    const participants = await Participant.find(filter)
+      .populate('competitionId', 'name refPrefix description imageUrl category')
+      .sort({ createdAt: -1 });
+
+    if (!participants || participants.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'No participant record found with this reference code or phone.',
+        message: 'No participant record found with this reference code or phone number.',
       });
     }
 
-    // Increment validation counter
-    participant.validatedCount = (participant.validatedCount || 0) + 1;
-    participant.lastValidatedAt = new Date();
-    await participant.save();
+    // Increment validation counters
+    for (const p of participants) {
+      p.validatedCount = (p.validatedCount || 0) + 1;
+      p.lastValidatedAt = new Date();
+      await p.save();
+    }
 
-    // Fetch corresponding certificate template
-    const certTemplate = await CertificateTemplate.findOne({
-      competitionId: participant.competitionId?._id,
-      variant: participant.achievementType,
-      isActive: true,
-    });
+    // Fetch corresponding certificate and poster templates for each matching participant
+    const results = await Promise.all(
+      participants.map(async (p) => {
+        const certTemplate = await CertificateTemplate.findOne({
+          competitionId: p.competitionId?._id,
+          variant: p.achievementType,
+          isActive: true,
+        });
 
-    // Fetch corresponding poster template
-    const posterTemplate = await PosterTemplate.findOne({
-      competitionId: participant.competitionId?._id,
-      type: participant.achievementType,
-    });
+        const posterTemplate = await PosterTemplate.findOne({
+          competitionId: p.competitionId?._id,
+          type: p.achievementType,
+        });
+
+        return {
+          participant: {
+            _id: p._id,
+            name: p.name,
+            phone: p.phone,
+            age: p.age,
+            category: p.category || 'General',
+            refNumber: p.refNumber,
+            achievementType: p.achievementType,
+            mediaUrl: p.mediaUrl,
+            competition: p.competitionId,
+            downloadCount: p.downloadCount,
+            posterDownloadCount: p.posterDownloadCount,
+            validatedCount: p.validatedCount,
+          },
+          certificateTemplate: certTemplate || null,
+          posterTemplate: posterTemplate || null,
+        };
+      })
+    );
 
     res.status(200).json({
       success: true,
       data: {
-        participant: {
-          _id: participant._id,
-          name: participant.name,
-          age: participant.age,
-          refNumber: participant.refNumber,
-          achievementType: participant.achievementType,
-          mediaUrl: participant.mediaUrl,
-          competition: participant.competitionId,
-          downloadCount: participant.downloadCount,
-          posterDownloadCount: participant.posterDownloadCount,
-          validatedCount: participant.validatedCount,
-        },
-        certificateTemplate: certTemplate || null,
-        posterTemplate: posterTemplate || null,
+        // Backwards compatibility for single-result consumers
+        participant: results[0].participant,
+        certificateTemplate: results[0].certificateTemplate,
+        posterTemplate: results[0].posterTemplate,
+        // All matching entries across categories and competitions
+        totalResults: results.length,
+        results,
       },
     });
   } catch (error) {

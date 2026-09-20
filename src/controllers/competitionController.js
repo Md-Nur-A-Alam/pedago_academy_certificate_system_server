@@ -3,6 +3,7 @@ const Competition = require('../models/Competition');
 
 const competitionSchema = z.object({
   name: z.string().min(1, 'Competition name is required'),
+  category: z.string().min(1, 'Category is required').default('General'),
   description: z.string().optional().default(''),
   refPrefix: z.string().min(1, 'Reference prefix is required').toUpperCase().trim(),
   refPadding: z.number().min(0).max(6).optional().default(0),

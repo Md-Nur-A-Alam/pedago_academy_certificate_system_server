@@ -29,6 +29,12 @@ const participantSchema = new mongoose.Schema(
       required: true,
       min: 1,
     },
+    category: {
+      type: String,
+      required: true,
+      trim: true,
+      default: 'General',
+    },
     sourceUrl: {
       type: String,
       required: true,
