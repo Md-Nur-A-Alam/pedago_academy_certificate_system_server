@@ -8,10 +8,12 @@ const participantRoutes = require('./participant.routes');
 const certificateRoutes = require('./certificate.routes');
 const posterRoutes = require('./poster.routes');
 const uploadRoutes = require('./upload.routes');
+const homepageSettingRoutes = require('./homepageSetting.routes');
 
 router.use('/admins', adminRoutes);
 router.use('/competitions', competitionRoutes);
 router.use('/settings', settingRoutes);
+router.use('/homepage-setting', homepageSettingRoutes);
 router.use('/participants', participantRoutes);
 router.use('/certificates', certificateRoutes);
 router.use('/posters', posterRoutes);
