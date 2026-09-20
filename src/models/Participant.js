@@ -24,6 +24,21 @@ const participantSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
     },
+    age: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+    sourceUrl: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    mediaUrl: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     achievementType: {
       type: String,
       enum: ['participant', 'winner'],

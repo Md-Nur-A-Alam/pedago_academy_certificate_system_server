@@ -65,7 +65,24 @@ const createOrUpdatePosterTemplate = async (req, res, next) => {
   }
 };
 
+const deletePosterTemplate = async (req, res, next) => {
+  try {
+    const template = await PosterTemplate.findByIdAndDelete(req.params.id);
+    if (!template) {
+      return res.status(404).json({ success: false, message: 'Poster template not found' });
+    }
+    res.status(200).json({
+      success: true,
+      message: 'Poster template deleted successfully',
+      data: template,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   listPosterTemplates,
   createOrUpdatePosterTemplate,
+  deletePosterTemplate,
 };

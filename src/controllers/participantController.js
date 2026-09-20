@@ -5,8 +5,11 @@ const Competition = require('../models/Competition');
 const participantSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z.string().min(1, 'Phone is required'),
+  age: z.coerce.number().min(1, 'Age must be at least 1').max(120, 'Invalid age'),
   competitionId: z.string().min(1, 'Competition ID is required'),
   achievementType: z.enum(['participant', 'winner']).default('participant'),
+  sourceUrl: z.string().min(1, 'Source URL is required'),
+  mediaUrl: z.string().optional().default(''),
 });
 
 const generateRefNumber = async (competition) => {
@@ -141,7 +144,7 @@ const archiveParticipant = async (req, res, next) => {
 
 const bulkUpload = async (req, res, next) => {
   try {
-    const { competitionId, rows } = req.body;
+    const { competitionId, achievementType, rows } = req.body;
     if (!competitionId || !Array.isArray(rows)) {
       return res.status(400).json({ success: false, message: 'Invalid bulk upload payload' });
     }
@@ -155,31 +158,60 @@ const bulkUpload = async (req, res, next) => {
     const inserted = [];
     const duplicates = [];
 
-    for (const row of rows) {
-      if (!row.name || !row.phone) continue;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const name = row.name ? String(row.name).trim() : '';
+      const phone = row.phone ? String(row.phone).trim() : '';
+      const sourceUrl = row.sourceUrl ? String(row.sourceUrl).trim() : '';
+      const mediaUrl = row.mediaUrl ? String(row.mediaUrl).trim() : '';
+      const age = Number(row.age) || 0;
+
+      if (!name || !phone || !sourceUrl) {
+        continue;
+      }
 
       // Check for duplicate by phone + competition
       const existing = await Participant.findOne({
         competitionId,
-        phone: row.phone.trim(),
+        phone,
         isDeleted: false,
       });
 
       if (existing) {
-        duplicates.push({ row, existing });
+        duplicates.push({
+          rowNumber: i + 1,
+          name,
+          phone,
+          age: age || existing.age || 'N/A',
+          sourceUrl,
+          existingRefNumber: existing.refNumber,
+          reason: `Phone already exists in this competition (Ref: ${existing.refNumber})`,
+        });
         continue;
       }
 
-      count += 1;
-      const paddedNum = String(count).padStart(competition.refPadding || 0, '0');
-      const refNumber = `${competition.refPrefix}-${paddedNum}`;
+      // Generate unique refNumber
+      let refNumber = '';
+      let isUnique = false;
+      while (!isUnique) {
+        count += 1;
+        const paddedNum = String(count).padStart(competition.refPadding || 0, '0');
+        refNumber = `${competition.refPrefix}-${paddedNum}`;
+        const refExists = await Participant.findOne({ refNumber });
+        if (!refExists) {
+          isUnique = true;
+        }
+      }
 
       const participant = new Participant({
-        name: row.name.trim(),
-        phone: row.phone.trim(),
+        name,
+        phone,
+        age: age > 0 ? age : 18,
+        sourceUrl,
+        mediaUrl,
         competitionId,
         refNumber,
-        achievementType: row.achievementType === 'winner' ? 'winner' : 'participant',
+        achievementType: (row.achievementType || achievementType || 'participant') === 'winner' ? 'winner' : 'participant',
       });
 
       await participant.save();
@@ -188,7 +220,7 @@ const bulkUpload = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      message: `Bulk import processed: ${inserted.length} inserted, ${duplicates.length} duplicates flagged.`,
+      message: `Bulk import completed: ${inserted.length} added, ${duplicates.length} duplicate rows skipped.`,
       data: {
         insertedCount: inserted.length,
         duplicateCount: duplicates.length,
