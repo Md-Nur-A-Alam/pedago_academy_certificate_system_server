@@ -3,6 +3,7 @@ const router = express.Router();
 const { requireAuth, requireRole } = require('../middlewares/requireRole');
 const {
   getMe,
+  updateMe,
   changePassword,
   listAdmins,
   createAdmin,
@@ -12,6 +13,7 @@ const {
 
 // Routes accessible to any authenticated admin
 router.get('/me', requireAuth, getMe);
+router.patch('/me', requireAuth, updateMe);
 router.post('/change-password', requireAuth, changePassword);
 
 // Routes restricted strictly to Super Admins

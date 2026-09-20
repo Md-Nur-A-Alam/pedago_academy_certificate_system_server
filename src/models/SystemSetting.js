@@ -14,6 +14,21 @@ const systemSettingSchema = new mongoose.Schema(
       type: String,
       default: 'Pedago Academy',
     },
+    contactEmail: {
+      type: String,
+      default: 'support@pedago.academy',
+      trim: true,
+    },
+    contactPhone: {
+      type: String,
+      default: '+880 1700-000000',
+      trim: true,
+    },
+    footerText: {
+      type: String,
+      default: 'Pedago Academy - Official Certificate & Poster Verification Portal',
+      trim: true,
+    },
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Admin',

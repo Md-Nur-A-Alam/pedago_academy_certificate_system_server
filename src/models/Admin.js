@@ -20,6 +20,31 @@ const adminSchema = new mongoose.Schema(
       default: 'admin',
       required: true,
     },
+    photo: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    phone: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    officeId: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    officeRole: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    bio: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     isActive: {
       type: Boolean,
       default: true,

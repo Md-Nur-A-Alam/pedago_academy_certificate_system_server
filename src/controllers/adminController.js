@@ -39,6 +39,11 @@ const getMe = async (req, res, next) => {
         name: admin.name,
         email: admin.email,
         role: admin.role,
+        photo: admin.photo || '',
+        phone: admin.phone || '',
+        officeId: admin.officeId || '',
+        officeRole: admin.officeRole || '',
+        bio: admin.bio || '',
         isActive: admin.isActive,
         mustChangePassword: admin.mustChangePassword,
         createdBy: admin.createdBy,
@@ -357,8 +362,65 @@ const deleteAdmin = async (req, res, next) => {
   }
 };
 
+const updateProfileSchema = z.object({
+  name: z.string().min(1, 'Name cannot be empty').trim().optional(),
+  phone: z.string().trim().optional(),
+  photo: z.string().trim().optional(),
+  officeId: z.string().trim().optional(),
+  officeRole: z.string().trim().optional(),
+  bio: z.string().trim().optional(),
+});
+
+/**
+ * Update profile of currently authenticated admin
+ * PATCH /api/admins/me
+ */
+const updateMe = async (req, res, next) => {
+  try {
+    const validatedData = updateProfileSchema.parse(req.body);
+    const admin = await Admin.findById(req.admin._id);
+    if (!admin) {
+      return res.status(404).json({ success: false, message: 'Admin account not found' });
+    }
+
+    if (validatedData.name) admin.name = validatedData.name;
+    if (typeof validatedData.phone !== 'undefined') admin.phone = validatedData.phone;
+    if (typeof validatedData.photo !== 'undefined') admin.photo = validatedData.photo;
+    if (typeof validatedData.officeId !== 'undefined') admin.officeId = validatedData.officeId;
+    if (typeof validatedData.officeRole !== 'undefined') admin.officeRole = validatedData.officeRole;
+    if (typeof validatedData.bio !== 'undefined') admin.bio = validatedData.bio;
+
+    await admin.save();
+
+    // Update Better Auth user record if name or photo changed
+    const db = mongoose.connection.db;
+    const userUpdate = {};
+    if (validatedData.name) userUpdate.name = validatedData.name;
+    if (validatedData.photo) userUpdate.image = validatedData.photo;
+    if (Object.keys(userUpdate).length > 0) {
+      userUpdate.updatedAt = new Date();
+      await db.collection('user').updateOne(
+        { email: admin.email },
+        { $set: userUpdate }
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: admin,
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, message: 'Validation error', errors: error.errors });
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   getMe,
+  updateMe,
   changePassword,
   listAdmins,
   createAdmin,

@@ -5,6 +5,9 @@ const settingsSchema = z.object({
   heroBgUrl: z.string().optional(),
   logoUrl: z.string().optional(),
   siteTitle: z.string().optional(),
+  contactEmail: z.string().optional(),
+  contactPhone: z.string().optional(),
+  footerText: z.string().optional(),
 });
 
 const getSettings = async (req, res, next) => {
