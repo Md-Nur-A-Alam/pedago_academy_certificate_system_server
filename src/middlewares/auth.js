@@ -1,13 +1,27 @@
-const { fromNodeHeaders } = require('better-auth/node');
 const { getAuth } = require('../config/auth');
 const Admin = require('../models/Admin');
+
+// Native Web Standard Headers converter (replaces better-auth/node ESM require to prevent ERR_REQUIRE_ESM on Linux/Vercel)
+const fromNodeHeaders = (nodeHeaders) => {
+  const webHeaders = new Headers();
+  for (const [key, value] of Object.entries(nodeHeaders)) {
+    if (value !== undefined) {
+      if (Array.isArray(value)) {
+        value.forEach((v) => webHeaders.append(key, v));
+      } else {
+        webHeaders.set(key, value);
+      }
+    }
+  }
+  return webHeaders;
+};
 
 /**
  * Clean session authentication middleware using official Better Auth API
  */
 const authMiddleware = async (req, res, next) => {
   try {
-    const auth = getAuth();
+    const auth = await getAuth();
 
     // Convert Express headers to Web Standard Headers for Better Auth
     const headers = fromNodeHeaders(req.headers);

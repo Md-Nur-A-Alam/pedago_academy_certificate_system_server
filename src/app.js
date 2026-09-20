@@ -4,12 +4,20 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
-const { toNodeHandler } = require('better-auth/node');
 const env = require('./config/env');
 const connectDB = require('./config/db');
 const { getAuth } = require('./config/auth');
 const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
+
+// Dynamic loader for Better Auth node handler to support ESM on Linux/Vercel (avoids ERR_REQUIRE_ESM)
+let nodeHandlerPromise = null;
+const getNodeHandler = () => {
+  if (!nodeHandlerPromise) {
+    nodeHandlerPromise = import('better-auth/node').then((m) => m.toNodeHandler);
+  }
+  return nodeHandlerPromise;
+};
 
 const app = express();
 
@@ -71,8 +79,18 @@ app.use(async (req, res, next) => {
 });
 
 // Better Auth API routes (handled before body parsing to preserve stream compatibility)
-app.all('/api/auth/*', (req, res) => {
-  return toNodeHandler(getAuth())(req, res);
+app.all(['/api/auth/*', '/auth/*'], async (req, res) => {
+  try {
+    const toNodeHandler = await getNodeHandler();
+    const auth = await getAuth();
+    return toNodeHandler(auth)(req, res);
+  } catch (err) {
+    console.error('[Better Auth Handler Error]:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Auth handler error: ' + err.message,
+    });
+  }
 });
 
 // Body parsers

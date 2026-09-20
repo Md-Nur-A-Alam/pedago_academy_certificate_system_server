@@ -1,7 +1,15 @@
 const mongoose = require('mongoose');
 const { z } = require('zod');
-const { hashPassword, verifyPassword } = require('better-auth/crypto');
 const Admin = require('../models/Admin');
+
+// Dynamic loader for better-auth/crypto to avoid ERR_REQUIRE_ESM on Linux/Vercel
+let cryptoPromise = null;
+const getCrypto = () => {
+  if (!cryptoPromise) {
+    cryptoPromise = import('better-auth/crypto');
+  }
+  return cryptoPromise;
+};
 
 const createAdminSchema = z.object({
   name: z.string().min(1, 'Name is required').trim(),
@@ -85,6 +93,7 @@ const changePassword = async (req, res, next) => {
     }
 
     // Verify current password using Better Auth verifier
+    const { hashPassword, verifyPassword } = await getCrypto();
     const isMatch = await verifyPassword({
       password: currentPassword,
       hash: account.password,
@@ -173,6 +182,7 @@ const createAdmin = async (req, res, next) => {
     const userCollection = db.collection('user');
     const accountCollection = db.collection('account');
 
+    const { hashPassword } = await getCrypto();
     const passwordHash = await hashPassword(validatedData.password);
     const now = new Date();
     const userIdStr = admin._id.toString();
