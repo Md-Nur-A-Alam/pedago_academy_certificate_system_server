@@ -88,8 +88,8 @@ app.get('/', (req, res) => {
   });
 });
 
-// Healthcheck route
-app.get('/api/health', (req, res) => {
+// Healthcheck routes
+app.get(['/api/health', '/health'], (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
