@@ -3,116 +3,17 @@ const path = require('path');
 const crypto = require('crypto');
 const env = require('../config/env');
 
-const UPLOADS_DIR = path.resolve(__dirname, '../../uploads');
 
-// Ensure local uploads directory exists as fallback
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
-
-/**
- * Save image buffer locally as a fallback
- */
-const saveLocally = async (buffer, originalname = 'upload.jpg') => {
-  const ext = path.extname(originalname) || '.jpg';
-  const uniqueName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`;
-  try {
-    if (!fs.existsSync(UPLOADS_DIR)) {
-      fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-    }
-    const filePath = path.join(UPLOADS_DIR, uniqueName);
-    await fs.promises.writeFile(filePath, buffer);
-    const baseUrl = env.SERVER_URL || '';
-    return `${baseUrl}/uploads/${uniqueName}`;
-  } catch (fsErr) {
-    console.warn('[Local Storage Fallback Warning]:', fsErr.message);
-    const mime =
-      ext === '.png'
-        ? 'image/png'
-        : ext === '.webp'
-        ? 'image/webp'
-        : ext === '.gif'
-        ? 'image/gif'
-        : 'image/jpeg';
-    return `data:${mime};base64,${buffer.toString('base64')}`;
-  }
-};
-
-// Circuit breakers to avoid latency when a provider is down
-let imgbbIsDown = false;
-let imgbbLastCheck = 0;
-let postimageIsDown = false;
-let postimageLastCheck = 0;
-const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes cooldown before retrying down provider
-
-/**
- * Upload to ImgBB
- */
-const uploadToImgbb = async (buffer, originalname) => {
-  const apiKey = env.IMGBB_API_KEY || process.env.IMGBB_API_KEY;
-  const uploadUrl = env.IMGBB_UPLOAD_URL || process.env.IMGBB_UPLOAD_URL || 'https://api.imgbb.com/1/upload';
-
-  if (!apiKey) return null;
-
-  const now = Date.now();
-  if (imgbbIsDown && now - imgbbLastCheck < COOLDOWN_MS) {
-    return null;
-  }
-
-  try {
-    imgbbLastCheck = now;
-    const base64Image = buffer.toString('base64');
-    const formData = new FormData();
-    formData.append('key', apiKey);
-    formData.append('image', base64Image);
-    formData.append('name', path.parse(originalname).name || 'upload');
-
-    const res = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      },
-      body: formData,
-      signal: AbortSignal.timeout(2500),
-    });
-
-    const json = await res.json();
-
-    if (json.success && json.data) {
-      imgbbIsDown = false;
-      return {
-        success: true,
-        url: json.data.url || json.data.display_url,
-        displayUrl: json.data.display_url,
-        provider: 'imgbb',
-      };
-    }
-
-    console.warn('[ImgBB Upload Warning]:', json.error?.message || json);
-    imgbbIsDown = true;
-  } catch (err) {
-    console.warn('[ImgBB Network Warning]: ImgBB unavailable. Trying next provider.', err.message);
-    imgbbIsDown = true;
-  }
-  return null;
-};
 
 /**
  * Upload to Postimages (postimages.org / postimg.cc)
  */
 const uploadToPostimages = async (buffer, originalname) => {
-  const apiKey = env.POSTIMAGE_API_KEY || process.env.POSTIMAGE_API_KEY;
+  const apiKey = env.POSTIMAGE_API_KEY || process.env.POSTIMAGE_API_KEY || '9b5b67a2f3e9d58b62f73aef25b0545f';
   if (!apiKey) return null;
 
-  const now = Date.now();
-  if (postimageIsDown && now - postimageLastCheck < COOLDOWN_MS) {
-    return null;
-  }
-
   try {
-    postimageLastCheck = now;
-    const ext = (path.extname(originalname) || '.png').replace('.', '').toLowerCase() || 'png';
+    const ext = (path.extname(originalname) || '.jpg').replace('.', '').toLowerCase() || 'jpg';
     const baseName = path.parse(originalname).name || 'upload';
 
     const params = new URLSearchParams();
@@ -132,7 +33,7 @@ const uploadToPostimages = async (buffer, originalname) => {
         'User-Agent': 'PostImage/1.0.1',
       },
       body: params.toString(),
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(30000), // 30s timeout for large images
     });
 
     const xml = await res.text();
@@ -140,7 +41,6 @@ const uploadToPostimages = async (buffer, originalname) => {
     const pageMatch = xml.match(/<page>([^<]+)<\/page>/i);
 
     if (hotlinkMatch && hotlinkMatch[1]) {
-      postimageIsDown = false;
       return {
         success: true,
         url: hotlinkMatch[1].trim(),
@@ -150,45 +50,98 @@ const uploadToPostimages = async (buffer, originalname) => {
     }
 
     const errorMatch = xml.match(/<error>([^<]+)<\/error>/i);
-    console.warn('[Postimages Warning]:', errorMatch ? errorMatch[1] : 'Upload failed');
-    postimageIsDown = true;
+    console.warn('[Postimages Warning]:', errorMatch ? errorMatch[1] : 'Upload failed: ' + xml.substring(0, 200));
   } catch (err) {
-    console.warn('[Postimages Warning]: Postimages unavailable. Trying next provider.', err.message);
-    postimageIsDown = true;
+    console.warn('[Postimages Warning]: Postimages unavailable. Trying next cloud provider...', err.message);
   }
   return null;
 };
 
 /**
- * Upload an image buffer across providers (ImgBB <-> Postimages) with local storage fallback
+ * Upload to ImgBB
+ */
+const uploadToImgbb = async (buffer, originalname) => {
+  const apiKey = env.IMGBB_API_KEY || process.env.IMGBB_API_KEY || '8d8681f7efba818251ffb798dc2e6aaa';
+  const uploadUrl = env.IMGBB_UPLOAD_URL || process.env.IMGBB_UPLOAD_URL || 'https://api.imgbb.com/1/upload';
+
+  if (!apiKey) return null;
+
+  try {
+    const base64Image = buffer.toString('base64');
+    const formData = new FormData();
+    formData.append('key', apiKey);
+    formData.append('image', base64Image);
+    formData.append('name', path.parse(originalname).name || 'upload');
+
+    const res = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      },
+      body: formData,
+      signal: AbortSignal.timeout(20000), // 20s timeout
+    });
+
+    const json = await res.json();
+
+    if (json.success && json.data) {
+      return {
+        success: true,
+        url: json.data.url || json.data.display_url,
+        displayUrl: json.data.display_url,
+        provider: 'imgbb',
+      };
+    }
+
+    console.warn('[ImgBB Upload Warning]:', json.error?.message || json);
+  } catch (err) {
+    console.warn('[ImgBB Warning]: ImgBB unavailable. Trying next cloud provider...', err.message);
+  }
+  return null;
+};
+
+/**
+ * Upload an image buffer across cloud providers (Postimages <-> ImgBB)
+ * strictly avoids saving on local server storage.
  */
 const uploadImageBuffer = async (buffer, originalname = 'image.jpg') => {
-  // If user configured preferred provider or if ImgBB is known down, prioritize Postimages
-  const preferred = (env.IMAGE_PROVIDER || process.env.IMAGE_PROVIDER || '').toLowerCase();
-
-  let providers;
-  if (preferred === 'postimage' || preferred === 'postimages' || imgbbIsDown) {
-    providers = [uploadToPostimages, uploadToImgbb];
-  } else {
-    providers = [uploadToImgbb, uploadToPostimages];
+  if (!buffer || buffer.length === 0) {
+    throw new Error('Image file is empty or corrupted.');
   }
 
-  for (const uploadFn of providers) {
-    const result = await uploadFn(buffer, originalname);
-    if (result && result.success && result.url) {
-      return result;
+  // Cloud provider chain: Try Postimages and ImgBB
+  const providers = [
+    { name: 'Postimages', fn: uploadToPostimages },
+    { name: 'ImgBB', fn: uploadToImgbb },
+  ];
+
+  const errors = [];
+  for (const { name, fn } of providers) {
+    try {
+      const result = await fn(buffer, originalname);
+      if (result && result.success && result.url) {
+        return result;
+      }
+      errors.push(`${name} failed`);
+    } catch (err) {
+      errors.push(`${name}: ${err.message}`);
     }
   }
 
-  // Local fallback storage if all external cloud providers are unavailable
-  const localUrl = await saveLocally(buffer, originalname);
-  return {
-    success: true,
-    url: localUrl,
-    displayUrl: localUrl,
-    provider: 'local',
-    notice: 'Image uploaded and saved to server storage.',
-  };
+  // If initial pass fails, retry Postimages one more time
+  try {
+    const retryResult = await uploadToPostimages(buffer, originalname);
+    if (retryResult && retryResult.success && retryResult.url) {
+      return retryResult;
+    }
+  } catch (retryErr) {
+    errors.push(`Postimages retry: ${retryErr.message}`);
+  }
+
+  throw new Error(
+    `Image cloud upload failed on both Postimages and ImgBB (${errors.join(', ')}). Please verify image format or try again.`
+  );
 };
 
 /**
