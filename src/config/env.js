@@ -37,6 +37,8 @@ module.exports = {
   MONGODB_URI,
   IMGBB_API_KEY: process.env.IMGBB_API_KEY || '8d8681f7efba818251ffb798dc2e6aaa',
   IMGBB_UPLOAD_URL: process.env.IMGBB_UPLOAD_URL || 'https://api.imgbb.com/1/upload',
+  POSTIMAGE_API_KEY: process.env.POSTIMAGE_API_KEY || '9b5b67a2f3e9d58b62f73aef25b0545f',
+  IMAGE_PROVIDER: process.env.IMAGE_PROVIDER || 'auto',
   SERVER_URL,
   CLIENT_URL,
   BETTER_AUTH_SECRET,

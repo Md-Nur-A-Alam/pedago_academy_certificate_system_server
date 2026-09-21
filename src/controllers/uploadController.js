@@ -30,7 +30,11 @@ const uploadFile = async (req, res, next) => {
       data: result,
     });
   } catch (error) {
-    next(error);
+    console.error('[Upload Controller Error]:', error);
+    res.status(error.statusCode || 400).json({
+      success: false,
+      message: error.message || 'Failed to upload image file.',
+    });
   }
 };
 

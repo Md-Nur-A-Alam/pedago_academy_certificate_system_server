@@ -51,6 +51,14 @@ const errorHandler = (err, req, res, next) => {
     });
   }
 
+  // Multer / Multipart errors (e.g. invalid boundary, file size limit)
+  if (err.name === 'MulterError' || (err.message && err.message.includes('Multipart: Boundary not found'))) {
+    return res.status(400).json({
+      success: false,
+      message: err.message || 'File upload failed. Please ensure a valid image file is selected.',
+    });
+  }
+
   const statusCode = err.statusCode || (res.statusCode >= 400 ? res.statusCode : 500);
 
   if (process.env.NODE_ENV !== 'production' && statusCode === 500) {

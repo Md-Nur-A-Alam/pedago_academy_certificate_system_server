@@ -1,5 +1,32 @@
 const mongoose = require('mongoose');
 
+const categoryGroupSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    details: {
+      type: String,
+      default: '',
+    },
+    criteria: {
+      type: String,
+      default: '',
+    },
+    rules: {
+      type: String,
+      default: '',
+    },
+    pictures: {
+      type: [String],
+      default: [],
+    },
+  },
+  { _id: true }
+);
+
 const competitionSchema = new mongoose.Schema(
   {
     name: {
@@ -17,9 +44,69 @@ const competitionSchema = new mongoose.Schema(
       type: [String],
       default: ['General'],
     },
+    categoryGroups: {
+      type: [categoryGroupSchema],
+      default: [],
+    },
+    topicType: {
+      type: String,
+      default: 'সাধারণ (General)',
+      trim: true,
+    },
+    topicTypes: {
+      type: [String],
+      default: ['সাধারণ (General)'],
+    },
+    minAge: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 120,
+    },
+    maxAge: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 120,
+    },
     description: {
       type: String,
       default: '',
+    },
+    mainRules: {
+      type: String,
+      default: '',
+    },
+    mainCriteria: {
+      type: String,
+      default: '',
+    },
+    galleryImages: {
+      type: [String],
+      default: [],
+    },
+    startDate: {
+      type: String,
+      default: '',
+    },
+    endDate: {
+      type: String,
+      default: '',
+    },
+    resultPublishDate: {
+      type: String,
+      default: '',
+    },
+    providesCertificate: {
+      type: Boolean,
+      default: true,
+    },
+    prizes: {
+      firstPrize: { type: String, default: '' },
+      secondPrize: { type: String, default: '' },
+      thirdPrize: { type: String, default: '' },
+      topNPrizes: { type: String, default: '' },
+      allParticipantPrize: { type: String, default: '' },
     },
     refPrefix: {
       type: String,
