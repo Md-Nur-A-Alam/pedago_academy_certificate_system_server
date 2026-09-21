@@ -65,7 +65,7 @@ const pictureStyleSchema = new mongoose.Schema(
     },
     animation: {
       type: String,
-      enum: ['none', 'float', 'pulse-glow', 'morph-amoeba'],
+      enum: ['none', 'float', 'pulse-glow', 'morph-amoeba', 'kenburns', 'tilt-3d', 'shimmer', 'bounce-subtle'],
       default: 'float',
     },
     shape: {
@@ -134,6 +134,29 @@ const homepageSettingSchema = new mongoose.Schema(
       imageUrl: {
         type: String,
         default: '/HeroBG.jpg',
+      },
+      images: {
+        type: [String],
+        default: ['/HeroBG.jpg'],
+      },
+      stayTime: {
+        type: Number,
+        default: 5,
+        min: 1,
+        max: 60,
+      },
+      transitionEffect: {
+        type: String,
+        enum: ['fade', 'slide', 'zoom', 'kenburns'],
+        default: 'fade',
+      },
+      showIndicators: {
+        type: Boolean,
+        default: true,
+      },
+      showNavigation: {
+        type: Boolean,
+        default: true,
       },
       bgOverlayColor: {
         type: String,

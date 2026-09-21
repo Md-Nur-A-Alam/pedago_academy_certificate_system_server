@@ -1,6 +1,8 @@
 const { z } = require('zod');
 const Competition = require('../models/Competition');
 const CompetitionTopic = require('../models/CompetitionTopic');
+const PosterTemplate = require('../models/PosterTemplate');
+const CertificateTemplate = require('../models/CertificateTemplate');
 
 const categoryGroupZodSchema = z.object({
   name: z.string().min(1, 'Category/group name is required').trim(),
@@ -9,6 +11,86 @@ const categoryGroupZodSchema = z.object({
   rules: z.string().optional().default(''),
   pictures: z.array(z.string()).max(2, 'Maximum 2 pictures allowed per category/group').optional().default([]),
 });
+
+const getLinkedPicturesForCompetition = async (competitionDoc) => {
+  const compId = competitionDoc._id;
+  const linkedList = [];
+  const seenUrls = new Set();
+
+  const addImage = (url, type, label, sublabel = '') => {
+    if (!url || typeof url !== 'string') return;
+    const trimmed = url.trim();
+    if (!trimmed || seenUrls.has(trimmed)) return;
+    seenUrls.add(trimmed);
+    linkedList.push({
+      url: trimmed,
+      type, // 'main' | 'group' | 'poster' | 'certificate' | 'other'
+      label,
+      sublabel,
+    });
+  };
+
+  // 1. Main Competition Banner / Thumbnail
+  if (competitionDoc.imageUrl) {
+    addImage(competitionDoc.imageUrl, 'main', 'মূল ব্যানার / কভার ছবি', 'Main Banner');
+  }
+
+  // 2. Category / Group Pictures
+  if (Array.isArray(competitionDoc.categoryGroups)) {
+    competitionDoc.categoryGroups.forEach((group, gIdx) => {
+      const gName = group.name || `গ্রুপ #${gIdx + 1}`;
+      if (Array.isArray(group.pictures)) {
+        group.pictures.forEach((picUrl, pIdx) => {
+          addImage(picUrl, 'group', `ক্যাটাগরি / গ্রুপ: ${gName}`, `গ্রুপ রেফারেন্স ছবি ${pIdx + 1}`);
+        });
+      }
+    });
+  }
+
+  // 3. Poster Templates
+  try {
+    const posterTemplates = await PosterTemplate.find({ competitionId: compId }).lean();
+    posterTemplates.forEach((poster) => {
+      const typeLabel =
+        poster.type === 'winner'
+          ? 'বিজয়ী পোস্টার টেমপ্লেট'
+          : 'অংশগ্রহণকারী পোস্টার টেমপ্লেট';
+      if (poster.backgroundImageUrl) {
+        addImage(poster.backgroundImageUrl, 'poster', typeLabel, 'Poster Template');
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching poster templates for linked pictures:', err.message);
+  }
+
+  // 4. Certificate Templates
+  try {
+    const certTemplates = await CertificateTemplate.find({ competitionId: compId }).lean();
+    certTemplates.forEach((cert) => {
+      const variantLabel =
+        cert.variant === 'winner'
+          ? 'বিজয়ী সার্টিফিকেট টেমপ্লেট'
+          : 'অংশগ্রহণকারী সার্টিফিকেট টেমপ্লেট';
+      if (cert.backgroundImageUrl) {
+        addImage(cert.backgroundImageUrl, 'certificate', variantLabel, 'Certificate Template');
+      }
+      if (cert.signatureZone?.imageUrl) {
+        addImage(cert.signatureZone.imageUrl, 'certificate', `${variantLabel} (স্বাক্ষর)`, 'Digital Signature');
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching certificate templates for linked pictures:', err.message);
+  }
+
+  // 5. Any legacy gallery images in document
+  if (Array.isArray(competitionDoc.galleryImages)) {
+    competitionDoc.galleryImages.forEach((imgUrl, idx) => {
+      addImage(imgUrl, 'other', `সংযুক্ত ছবি #${idx + 1}`, 'Event Photo');
+    });
+  }
+
+  return linkedList;
+};
 
 const BASELINE_TOPICS = [
   'ছবি আঁকা',
@@ -67,7 +149,7 @@ const competitionSchema = z.object({
   description: z.string().optional().default(''),
   mainRules: z.string().optional().default(''),
   mainCriteria: z.string().optional().default(''),
-  galleryImages: z.array(z.string()).max(5, 'Maximum 5 gallery pictures allowed').optional().default([]),
+  galleryImages: z.array(z.string()).optional().default([]),
   startDate: z.string().optional().default(''),
   endDate: z.string().optional().default(''),
   resultPublishDate: z.string().optional().default(''),
@@ -129,7 +211,10 @@ const createCompetition = async (req, res, next) => {
       await saveNewTopicsToDb([validatedData.topicType]);
     }
 
-    const competition = new Competition(validatedData);
+    const competition = new Competition({
+      ...validatedData,
+      createdBy: req.admin?._id || null,
+    });
     await competition.save();
 
     res.status(201).json({
@@ -182,19 +267,36 @@ const listCompetitions = async (req, res, next) => {
     const filter = { isDeleted: false };
 
     if (req.query.search) {
-      filter.name = { $regex: req.query.search, $options: 'i' };
+      const searchRegex = { $regex: req.query.search, $options: 'i' };
+      filter.$or = [
+        { name: searchRegex },
+        { category: searchRegex },
+        { categories: { $in: [searchRegex] } },
+        { topicType: searchRegex },
+        { topicTypes: { $in: [searchRegex] } },
+        { description: searchRegex },
+        { refPrefix: searchRegex },
+      ];
+    }
+
+    if (req.query.category && req.query.category !== 'all') {
+      filter.$or = [
+        { category: req.query.category },
+        { categories: { $in: [req.query.category] } },
+        { 'categoryGroups.name': req.query.category },
+      ];
     }
 
     if (req.query.topic && req.query.topic !== 'all') {
       filter.$or = [
         { topicType: req.query.topic },
-        { topicTypes: req.query.topic },
+        { topicTypes: { $in: [req.query.topic] } },
       ];
     }
 
     if (req.query.age) {
       const ageNum = parseInt(req.query.age, 10);
-      if (!isNaN(ageNum) && ageNum > 0) {
+      if (!isNaN(ageNum)) {
         filter.$and = filter.$and || [];
         filter.$and.push(
           { $or: [{ minAge: { $lte: ageNum } }, { minAge: 0 }, { minAge: { $exists: false } }] },
@@ -213,6 +315,33 @@ const listCompetitions = async (req, res, next) => {
       .skip(skip)
       .limit(limit);
 
+    const compIds = competitions.map((c) => c._id);
+    let postersByComp = {};
+    let certsByComp = {};
+
+    try {
+      const [allPosters, allCerts] = await Promise.all([
+        PosterTemplate.find({ competitionId: { $in: compIds } }).select('competitionId type backgroundImageUrl').lean(),
+        CertificateTemplate.find({ competitionId: { $in: compIds } }).select('competitionId variant backgroundImageUrl').lean(),
+      ]);
+
+      allPosters.forEach((p) => {
+        if (!p.competitionId) return;
+        const cid = p.competitionId.toString();
+        if (!postersByComp[cid]) postersByComp[cid] = [];
+        if (p.backgroundImageUrl) postersByComp[cid].push(p.backgroundImageUrl);
+      });
+
+      allCerts.forEach((c) => {
+        if (!c.competitionId) return;
+        const cid = c.competitionId.toString();
+        if (!certsByComp[cid]) certsByComp[cid] = [];
+        if (c.backgroundImageUrl) certsByComp[cid].push(c.backgroundImageUrl);
+      });
+    } catch (err) {
+      console.error('Error fetching linked templates for list:', err.message);
+    }
+
     const sanitized = competitions.map((comp) => {
       const obj = comp.toObject();
       if ((!obj.categoryGroups || obj.categoryGroups.length === 0) && obj.categories?.length > 0) {
@@ -224,6 +353,25 @@ const listCompetitions = async (req, res, next) => {
           pictures: [],
         }));
       }
+
+      // Aggregate all linked pictures into galleryImages
+      const urls = new Set();
+      if (obj.imageUrl) urls.add(obj.imageUrl);
+      if (Array.isArray(obj.categoryGroups)) {
+        obj.categoryGroups.forEach((g) => {
+          if (Array.isArray(g.pictures)) {
+            g.pictures.forEach((p) => p && urls.add(p));
+          }
+        });
+      }
+      const cid = obj._id.toString();
+      (postersByComp[cid] || []).forEach((u) => urls.add(u));
+      (certsByComp[cid] || []).forEach((u) => urls.add(u));
+      (obj.galleryImages || []).forEach((u) => u && urls.add(u));
+
+      obj.galleryImages = Array.from(urls);
+      obj.totalLinkedPhotos = obj.galleryImages.length;
+
       return obj;
     });
 
@@ -260,6 +408,12 @@ const getCompetitionById = async (req, res, next) => {
         pictures: [],
       }));
     }
+
+    // Automatically aggregate all linked pictures across the entire system
+    const linkedGallery = await getLinkedPicturesForCompetition(compObj);
+    compObj.linkedGallery = linkedGallery;
+    compObj.galleryImages = linkedGallery.map((item) => item.url);
+    compObj.totalLinkedPhotos = linkedGallery.length;
 
     res.status(200).json({
       success: true,
@@ -364,6 +518,7 @@ const archiveCompetition = async (req, res, next) => {
 module.exports = {
   createCompetition,
   listCompetitions,
+  getCompetitions: listCompetitions,
   getCompetitionById,
   getCompetitionTopics,
   addCompetitionTopic,

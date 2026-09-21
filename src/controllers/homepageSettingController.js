@@ -22,7 +22,7 @@ const pictureStyleSchema = z
     shadow: z.enum(['none', 'soft', 'strong', 'glow']).optional().default('glow'),
     shadowColor: z.string().optional().default('rgba(245, 158, 11, 0.4)'),
     animation: z
-      .enum(['none', 'float', 'pulse-glow', 'morph-amoeba'])
+      .enum(['none', 'float', 'pulse-glow', 'morph-amoeba', 'kenburns', 'tilt-3d', 'shimmer', 'bounce-subtle'])
       .optional()
       .default('float'),
     shape: z
@@ -50,6 +50,11 @@ const homepageSettingSchema = z.object({
       subtitleColor: z.string().optional().default('rgba(255, 255, 255, 0.9)'),
       layoutMode: z.enum(['background', 'flex']).optional().default('background'),
       imageUrl: z.string().optional().default('/HeroBG.jpg'),
+      images: z.array(z.string()).max(10).optional().default(['/HeroBG.jpg']),
+      stayTime: z.number().min(1).max(60).optional().default(5),
+      transitionEffect: z.enum(['fade', 'slide', 'zoom', 'kenburns']).optional().default('fade'),
+      showIndicators: z.boolean().optional().default(true),
+      showNavigation: z.boolean().optional().default(true),
       bgOverlayColor: z.string().optional().default('#1A284A'),
       bgType: z.enum(['solid', 'gradient']).optional().default('solid'),
       bgSolidColor: z.string().optional().default('#1A284A'),
@@ -108,6 +113,14 @@ const getHomepageSetting = async (req, res, next) => {
 const updateHomepageSetting = async (req, res, next) => {
   try {
     const validatedData = homepageSettingSchema.parse(req.body);
+
+    if (validatedData.hero) {
+      if (Array.isArray(validatedData.hero.images) && validatedData.hero.images.length > 0) {
+        validatedData.hero.imageUrl = validatedData.hero.images[0];
+      } else if (validatedData.hero.imageUrl) {
+        validatedData.hero.images = [validatedData.hero.imageUrl];
+      }
+    }
 
     let setting = await HomepageSetting.findOne();
     if (!setting) {
