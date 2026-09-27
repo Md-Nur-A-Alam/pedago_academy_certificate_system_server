@@ -10,9 +10,12 @@ const {
   verifyParticipant,
   updateParticipantPhoto,
   recordDownload,
+  publicRegisterParticipant,
 } = require('../controllers/participantController');
+const { registrationRateLimiter } = require('../middlewares/rateLimiter');
 
 // Public endpoints (no admin auth required)
+router.post('/public-register', registrationRateLimiter, publicRegisterParticipant);
 router.get('/verify', verifyParticipant);
 router.post('/update-photo', updateParticipantPhoto);
 router.post('/record-download', recordDownload);

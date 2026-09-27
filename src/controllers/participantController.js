@@ -433,6 +433,129 @@ const recordDownload = async (req, res, next) => {
   }
 };
 
+const publicRegisterSchema = z.object({
+  name: z.string().min(2, 'Full name is required (minimum 2 characters)').trim(),
+  phone: z.string().min(6, 'Valid phone number is required').trim(),
+  age: z.coerce.number().min(1, 'Age must be at least 1').max(120, 'Invalid age'),
+  category: z.string().min(1, 'Category is required').trim(),
+  competitionId: z.string().min(1, 'Competition is required').trim(),
+  sourceUrl: z.string().min(1, 'Source URL of your post or video is required').trim(),
+  mediaUrl: z.string().optional().default(''),
+});
+
+// Self-service public registration for anonymous participants
+const publicRegisterParticipant = async (req, res, next) => {
+  try {
+    const validatedData = publicRegisterSchema.parse(req.body);
+
+    const competition = await Competition.findOne({
+      _id: validatedData.competitionId,
+      isDeleted: false,
+    });
+
+    if (!competition) {
+      return res.status(404).json({
+        success: false,
+        message: 'Selected competition not found or is no longer available.',
+      });
+    }
+
+    if (competition.status === 'archived') {
+      return res.status(400).json({
+        success: false,
+        message: 'This competition has been archived and is no longer accepting new registrations.',
+      });
+    }
+
+    // Check duplicate by phone + competitionId + category (case-insensitive)
+    const escapedCategory = validatedData.category.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const digitsOnly = validatedData.phone.replace(/\D/g, '');
+
+    const phoneConditions = [{ phone: validatedData.phone }];
+    if (digitsOnly.length >= 6) {
+      const lastDigits = digitsOnly.slice(-8);
+      const pattern = lastDigits.split('').join('\\D*') + '$';
+      phoneConditions.push({ phone: { $regex: new RegExp(pattern) } });
+    }
+
+    const existing = await Participant.findOne({
+      competitionId: competition._id,
+      $or: phoneConditions,
+      category: { $regex: new RegExp(`^${escapedCategory}$`, 'i') },
+      isDeleted: false,
+    });
+
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: `You are already registered for "${competition.name}" under category "${existing.category}". Your Reference ID is ${existing.refNumber}.`,
+        existingRefNumber: existing.refNumber,
+        existingCategory: existing.category,
+      });
+    }
+
+    // Generate unique sequential reference number
+    let refNumber = '';
+    let isUnique = false;
+    let count = await Participant.countDocuments({ competitionId: competition._id });
+
+    while (!isUnique) {
+      count += 1;
+      const paddedNum = String(count).padStart(competition.refPadding || 0, '0');
+      refNumber = `${competition.refPrefix}-${paddedNum}`;
+      const refExists = await Participant.findOne({ refNumber });
+      if (!refExists) {
+        isUnique = true;
+      }
+    }
+
+    // Enforce achievementType strictly as 'participant'
+    const participant = new Participant({
+      name: validatedData.name,
+      phone: validatedData.phone,
+      age: validatedData.age,
+      category: validatedData.category,
+      competitionId: competition._id,
+      refNumber,
+      achievementType: 'participant',
+      sourceUrl: validatedData.sourceUrl,
+      mediaUrl: validatedData.mediaUrl || '',
+    });
+
+    await participant.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Registration successful! Please save your Reference ID.',
+      data: {
+        _id: participant._id,
+        name: participant.name,
+        phone: participant.phone,
+        age: participant.age,
+        category: participant.category,
+        refNumber: participant.refNumber,
+        achievementType: participant.achievementType,
+        sourceUrl: participant.sourceUrl,
+        mediaUrl: participant.mediaUrl,
+        competition: {
+          _id: competition._id,
+          name: competition.name,
+          refPrefix: competition.refPrefix,
+        },
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        message: error.errors[0]?.message || 'Validation Error',
+        errors: error.errors,
+      });
+    }
+    next(error);
+  }
+};
+
 module.exports = {
   createParticipant,
   listParticipants,
@@ -442,4 +565,5 @@ module.exports = {
   verifyParticipant,
   updateParticipantPhoto,
   recordDownload,
+  publicRegisterParticipant,
 };
