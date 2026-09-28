@@ -16,11 +16,42 @@ const participantSchema = z.object({
 });
 
 const generateRefNumber = async (competition) => {
-  // Count existing participants for this competition to determine next index
-  const count = await Participant.countDocuments({ competitionId: competition._id });
-  const nextNum = count + 1;
-  const paddedNum = String(nextNum).padStart(competition.refPadding || 0, '0');
-  return `${competition.refPrefix}-${paddedNum}`;
+  const prefix = (competition.refPrefix || 'REF').trim().toUpperCase();
+  const padding = Number(competition.refPadding) || 3;
+
+  // Find all existing refNumbers starting with this prefix in the collection (including deleted ones)
+  const existingDocs = await Participant.find(
+    { refNumber: new RegExp(`^${prefix}-\\d+$`, 'i') },
+    { refNumber: 1 }
+  ).lean();
+
+  let maxNum = 0;
+  for (const doc of existingDocs) {
+    if (doc.refNumber) {
+      const parts = doc.refNumber.toUpperCase().split('-');
+      const numPart = parts[parts.length - 1];
+      const parsed = parseInt(numPart, 10);
+      if (!isNaN(parsed) && parsed > maxNum) {
+        maxNum = parsed;
+      }
+    }
+  }
+
+  let nextNum = maxNum;
+  let isUnique = false;
+  let refNumber = '';
+
+  while (!isUnique) {
+    nextNum += 1;
+    const paddedNum = String(nextNum).padStart(padding, '0');
+    refNumber = `${prefix}-${paddedNum}`;
+    const exists = await Participant.findOne({ refNumber });
+    if (!exists) {
+      isUnique = true;
+    }
+  }
+
+  return refNumber;
 };
 
 const createParticipant = async (req, res, next) => {
@@ -205,17 +236,7 @@ const bulkUpload = async (req, res, next) => {
       }
 
       // Generate unique refNumber
-      let refNumber = '';
-      let isUnique = false;
-      while (!isUnique) {
-        count += 1;
-        const paddedNum = String(count).padStart(competition.refPadding || 0, '0');
-        refNumber = `${competition.refPrefix}-${paddedNum}`;
-        const refExists = await Participant.findOne({ refNumber });
-        if (!refExists) {
-          isUnique = true;
-        }
-      }
+      const refNumber = await generateRefNumber(competition);
 
       const participant = new Participant({
         name,
@@ -495,19 +516,7 @@ const publicRegisterParticipant = async (req, res, next) => {
     }
 
     // Generate unique sequential reference number
-    let refNumber = '';
-    let isUnique = false;
-    let count = await Participant.countDocuments({ competitionId: competition._id });
-
-    while (!isUnique) {
-      count += 1;
-      const paddedNum = String(count).padStart(competition.refPadding || 0, '0');
-      refNumber = `${competition.refPrefix}-${paddedNum}`;
-      const refExists = await Participant.findOne({ refNumber });
-      if (!refExists) {
-        isUnique = true;
-      }
-    }
+    const refNumber = await generateRefNumber(competition);
 
     // Enforce achievementType strictly as 'participant'
     const participant = new Participant({
