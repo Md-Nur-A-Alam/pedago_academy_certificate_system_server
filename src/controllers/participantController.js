@@ -54,6 +54,12 @@ const generateRefNumber = async (competition) => {
   return refNumber;
 };
 
+const {
+  parseLocalDate,
+  validateRegistrationDates,
+  validateCertificateDownloadDate,
+} = require('../utils/dateUtils');
+
 const createParticipant = async (req, res, next) => {
   try {
     const validatedData = participantSchema.parse(req.body);
@@ -61,6 +67,15 @@ const createParticipant = async (req, res, next) => {
     const competition = await Competition.findOne({ _id: validatedData.competitionId, isDeleted: false });
     if (!competition) {
       return res.status(404).json({ success: false, message: 'Competition not found' });
+    }
+
+    const dateCheck = validateRegistrationDates(competition);
+    if (!dateCheck.allowed && !req.body.overrideDateLimits) {
+      return res.status(400).json({
+        success: false,
+        message: dateCheck.message,
+        code: dateCheck.code,
+      });
     }
 
     const refNumber = await generateRefNumber(competition);
@@ -310,7 +325,7 @@ const verifyParticipant = async (req, res, next) => {
     }
 
     const participants = await Participant.find(filter)
-      .populate('competitionId', 'name refPrefix description imageUrl category')
+      .populate('competitionId', 'name refPrefix description imageUrl category startDate endDate resultPublishDate providesCertificate')
       .sort({ createdAt: -1 });
 
     if (!participants || participants.length === 0) {
@@ -341,6 +356,17 @@ const verifyParticipant = async (req, res, next) => {
           type: p.achievementType,
         });
 
+        const comp = p.competitionId;
+        const certDateCheck = validateCertificateDownloadDate(comp);
+        const isResultPublished = Boolean(certDateCheck.allowed);
+        const canDownloadCertificate = comp?.providesCertificate !== false && isResultPublished;
+        const canPreviewCertificate = isResultPublished;
+        const certificateMessage = !isResultPublished
+          ? certDateCheck.message
+          : comp?.providesCertificate === false
+          ? 'এই প্রতিযোগিতায় সার্টিফিকেট প্রযোজ্য নয়'
+          : '';
+
         return {
           participant: {
             _id: p._id,
@@ -355,9 +381,22 @@ const verifyParticipant = async (req, res, next) => {
             downloadCount: p.downloadCount,
             posterDownloadCount: p.posterDownloadCount,
             validatedCount: p.validatedCount,
+            canDownloadCertificate,
+            canPreviewCertificate,
+            isResultPublished,
+            certificateMessage,
+            resultPublishDate: comp?.resultPublishDate || '',
+            startDate: comp?.startDate || '',
+            endDate: comp?.endDate || '',
           },
+          // Send certificateTemplate so verified users can see the blur preview even before publication,
+          // while download is strictly prevented both on client and server
           certificateTemplate: certTemplate || null,
           posterTemplate: posterTemplate || null,
+          canDownloadCertificate,
+          canPreviewCertificate,
+          isResultPublished,
+          certificateMessage,
         };
       })
     );
@@ -434,6 +473,18 @@ const recordDownload = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Participant not found' });
     }
 
+    if (type !== 'poster') {
+      const comp = await Competition.findById(participant.competitionId);
+      const certDateCheck = validateCertificateDownloadDate(comp);
+      if (!certDateCheck.allowed) {
+        return res.status(403).json({
+          success: false,
+          message: certDateCheck.message,
+          code: certDateCheck.code,
+        });
+      }
+    }
+
     if (type === 'poster') {
       participant.posterDownloadCount = (participant.posterDownloadCount || 0) + 1;
     } else {
@@ -485,6 +536,16 @@ const publicRegisterParticipant = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'This competition has been archived and is no longer accepting new registrations.',
+      });
+    }
+
+    // Validate registration dates window (startDate and endDate)
+    const regDateCheck = validateRegistrationDates(competition);
+    if (!regDateCheck.allowed) {
+      return res.status(400).json({
+        success: false,
+        message: regDateCheck.message,
+        code: regDateCheck.code,
       });
     }
 

@@ -3,6 +3,7 @@ const Competition = require('../models/Competition');
 const CompetitionTopic = require('../models/CompetitionTopic');
 const PosterTemplate = require('../models/PosterTemplate');
 const CertificateTemplate = require('../models/CertificateTemplate');
+const { validateCertificateDownloadDate } = require('../utils/dateUtils');
 
 const categoryGroupZodSchema = z.object({
   name: z.string().min(1, 'Category/group name is required').trim(),
@@ -63,23 +64,26 @@ const getLinkedPicturesForCompetition = async (competitionDoc) => {
     console.error('Error fetching poster templates for linked pictures:', err.message);
   }
 
-  // 4. Certificate Templates
-  try {
-    const certTemplates = await CertificateTemplate.find({ competitionId: compId }).lean();
-    certTemplates.forEach((cert) => {
-      const variantLabel =
-        cert.variant === 'winner'
-          ? 'বিজয়ী সার্টিফিকেট টেমপ্লেট'
-          : 'অংশগ্রহণকারী সার্টিফিকেট টেমপ্লেট';
-      if (cert.backgroundImageUrl) {
-        addImage(cert.backgroundImageUrl, 'certificate', variantLabel, 'Certificate Template');
-      }
-      if (cert.signatureZone?.imageUrl) {
-        addImage(cert.signatureZone.imageUrl, 'certificate', `${variantLabel} (স্বাক্ষর)`, 'Digital Signature');
-      }
-    });
-  } catch (err) {
-    console.error('Error fetching certificate templates for linked pictures:', err.message);
+  // 4. Certificate Templates (Only if result publish date has passed)
+  const certDateCheck = validateCertificateDownloadDate(competitionDoc);
+  if (certDateCheck.allowed && competitionDoc.providesCertificate !== false) {
+    try {
+      const certTemplates = await CertificateTemplate.find({ competitionId: compId }).lean();
+      certTemplates.forEach((cert) => {
+        const variantLabel =
+          cert.variant === 'winner'
+            ? 'বিজয়ী সার্টিফিকেট টেমপ্লেট'
+            : 'অংশগ্রহণকারী সার্টিফিকেট টেমপ্লেট';
+        if (cert.backgroundImageUrl) {
+          addImage(cert.backgroundImageUrl, 'certificate', variantLabel, 'Certificate Template');
+        }
+        if (cert.signatureZone?.imageUrl) {
+          addImage(cert.signatureZone.imageUrl, 'certificate', `${variantLabel} (স্বাক্ষর)`, 'Digital Signature');
+        }
+      });
+    } catch (err) {
+      console.error('Error fetching certificate templates for linked pictures:', err.message);
+    }
   }
 
   // 5. Any legacy gallery images in document
@@ -271,9 +275,9 @@ const listCompetitions = async (req, res, next) => {
       filter.$or = [
         { name: searchRegex },
         { category: searchRegex },
-        { categories: { $in: [searchRegex] } },
+        { categories: searchRegex },
         { topicType: searchRegex },
-        { topicTypes: { $in: [searchRegex] } },
+        { topicTypes: searchRegex },
         { description: searchRegex },
         { refPrefix: searchRegex },
       ];
@@ -282,7 +286,7 @@ const listCompetitions = async (req, res, next) => {
     if (req.query.category && req.query.category !== 'all') {
       filter.$or = [
         { category: req.query.category },
-        { categories: { $in: [req.query.category] } },
+        { categories: req.query.category },
         { 'categoryGroups.name': req.query.category },
       ];
     }
@@ -290,7 +294,7 @@ const listCompetitions = async (req, res, next) => {
     if (req.query.topic && req.query.topic !== 'all') {
       filter.$or = [
         { topicType: req.query.topic },
-        { topicTypes: { $in: [req.query.topic] } },
+        { topicTypes: req.query.topic },
       ];
     }
 
@@ -332,9 +336,13 @@ const listCompetitions = async (req, res, next) => {
         if (p.backgroundImageUrl) postersByComp[cid].push(p.backgroundImageUrl);
       });
 
+      const compMap = new Map(competitions.map((c) => [c._id.toString(), c]));
       allCerts.forEach((c) => {
         if (!c.competitionId) return;
         const cid = c.competitionId.toString();
+        const comp = compMap.get(cid);
+        // Only include certificates if result has been published
+        if (comp && !validateCertificateDownloadDate(comp).allowed) return;
         if (!certsByComp[cid]) certsByComp[cid] = [];
         if (c.backgroundImageUrl) certsByComp[cid].push(c.backgroundImageUrl);
       });
