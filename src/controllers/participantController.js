@@ -102,9 +102,10 @@ const createParticipant = async (req, res, next) => {
 
 const listParticipants = async (req, res, next) => {
   try {
+    const isAll = req.query.limit === 'all' || req.query.all === 'true';
     const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 10;
-    const skip = (page - 1) * limit;
+    const limit = isAll ? 0 : (parseInt(req.query.limit, 10) || 10);
+    const skip = isAll ? 0 : (page - 1) * limit;
 
     const filter = { isDeleted: false };
 
@@ -131,20 +132,23 @@ const listParticipants = async (req, res, next) => {
     }
 
     const total = await Participant.countDocuments(filter);
-    const participants = await Participant.find(filter)
+    let partQuery = Participant.find(filter)
       .populate('competitionId', 'name refPrefix refPadding')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+      .sort({ createdAt: -1 });
+
+    if (!isAll) {
+      partQuery = partQuery.skip(skip).limit(limit);
+    }
+    const participants = await partQuery;
 
     res.status(200).json({
       success: true,
       data: participants,
       pagination: {
         total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit) || 1,
+        page: isAll ? 1 : page,
+        limit: isAll ? total : limit,
+        totalPages: isAll ? 1 : (Math.ceil(total / limit) || 1),
       },
     });
   } catch (error) {

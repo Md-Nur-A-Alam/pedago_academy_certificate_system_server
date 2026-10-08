@@ -264,9 +264,10 @@ const getCompetitionTopics = async (req, res, next) => {
 
 const listCompetitions = async (req, res, next) => {
   try {
+    const isAll = req.query.limit === 'all' || req.query.all === 'true';
     const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 10;
-    const skip = (page - 1) * limit;
+    const limit = isAll ? 0 : (parseInt(req.query.limit, 10) || 10);
+    const skip = isAll ? 0 : (page - 1) * limit;
 
     const filter = { isDeleted: false };
 
@@ -314,10 +315,11 @@ const listCompetitions = async (req, res, next) => {
     }
 
     const total = await Competition.countDocuments(filter);
-    const competitions = await Competition.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+    let compQuery = Competition.find(filter).sort({ createdAt: -1 });
+    if (!isAll) {
+      compQuery = compQuery.skip(skip).limit(limit);
+    }
+    const competitions = await compQuery;
 
     const compIds = competitions.map((c) => c._id);
     let postersByComp = {};
@@ -388,9 +390,9 @@ const listCompetitions = async (req, res, next) => {
       data: sanitized,
       pagination: {
         total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit) || 1,
+        page: isAll ? 1 : page,
+        limit: isAll ? total : limit,
+        totalPages: isAll ? 1 : (Math.ceil(total / limit) || 1),
       },
     });
   } catch (error) {
