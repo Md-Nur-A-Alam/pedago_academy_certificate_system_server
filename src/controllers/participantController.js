@@ -109,8 +109,11 @@ const listParticipants = async (req, res, next) => {
 
     const filter = { isDeleted: false };
 
+    // Escape regex utility for safe queries
+    const escapeRegex = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
     if (req.query.search) {
-      const searchRegex = { $regex: req.query.search, $options: 'i' };
+      const searchRegex = { $regex: escapeRegex(req.query.search.trim()), $options: 'i' };
       filter.$or = [
         { name: searchRegex },
         { phone: searchRegex },
@@ -123,12 +126,46 @@ const listParticipants = async (req, res, next) => {
       filter.competitionId = req.query.competitionId;
     }
 
-    if (req.query.category) {
-      filter.category = { $regex: req.query.category, $options: 'i' };
+    if (req.query.category && req.query.category.trim() !== '') {
+      filter.category = { $regex: `^${escapeRegex(req.query.category.trim())}$`, $options: 'i' };
     }
 
     if (req.query.achievementType && ['participant', 'winner'].includes(req.query.achievementType)) {
       filter.achievementType = req.query.achievementType;
+    }
+
+    // Age range filter
+    const minAge = req.query.minAge !== undefined && req.query.minAge !== '' ? Number(req.query.minAge) : null;
+    const maxAge = req.query.maxAge !== undefined && req.query.maxAge !== '' ? Number(req.query.maxAge) : null;
+    if ((minAge !== null && !isNaN(minAge)) || (maxAge !== null && !isNaN(maxAge))) {
+      filter.age = {};
+      if (minAge !== null && !isNaN(minAge)) {
+        filter.age.$gte = minAge;
+      }
+      if (maxAge !== null && !isNaN(maxAge)) {
+        filter.age.$lte = maxAge;
+      }
+    }
+
+    // Created At date range filter
+    const startDateStr = req.query.startDate || req.query.createdFrom || req.query.fromDate;
+    const endDateStr = req.query.endDate || req.query.createdTo || req.query.toDate;
+    if (startDateStr || endDateStr) {
+      filter.createdAt = {};
+      if (startDateStr) {
+        const start = new Date(startDateStr);
+        if (!isNaN(start.getTime())) {
+          start.setHours(0, 0, 0, 0);
+          filter.createdAt.$gte = start;
+        }
+      }
+      if (endDateStr) {
+        const end = new Date(endDateStr);
+        if (!isNaN(end.getTime())) {
+          end.setHours(23, 59, 59, 999);
+          filter.createdAt.$lte = end;
+        }
+      }
     }
 
     const total = await Participant.countDocuments(filter);
@@ -141,6 +178,9 @@ const listParticipants = async (req, res, next) => {
     }
     const participants = await partQuery;
 
+    // Fetch distinct categories in participant collection
+    const availableCategories = await Participant.distinct('category', { isDeleted: false });
+
     res.status(200).json({
       success: true,
       data: participants,
@@ -150,6 +190,7 @@ const listParticipants = async (req, res, next) => {
         limit: isAll ? total : limit,
         totalPages: isAll ? 1 : (Math.ceil(total / limit) || 1),
       },
+      availableCategories: (availableCategories || []).filter(Boolean),
     });
   } catch (error) {
     next(error);
